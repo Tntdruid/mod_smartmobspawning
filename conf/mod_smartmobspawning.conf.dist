@@ -1,0 +1,106 @@
+[worldserver]
+
+###################################################################################################
+# SMART MOB SPAWNING
+#
+#    Shortens the respawn timer of open-world creatures while a nearby player still needs a
+#    quest item from their loot. The module never lengthens a timer, and it works on top of the
+#    core's Respawn.Dynamic* settings.
+#
+#    Timer formula, counted from the moment the creature dies:
+#        upper = min(the spawn's normal respawn time, MaxDelay)
+#        delay = MinDelay + (upper - MinDelay) * min(1, alive / (AliveTargetPerPlayer * players))
+#
+#    A corpse is never removed early, so a creature cannot return before its corpse has decayed.
+#
+#    SmartMobSpawning.Enable
+#        Description: Enable the module.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+
+SmartMobSpawning.Enable = 1
+
+#
+#    SmartMobSpawning.Radius
+#        Description: Yards around the creature (or player, in the scan) that are searched for
+#                     players, living quest creatures and pending respawns.
+#        Default:     100
+
+SmartMobSpawning.Radius = 100
+
+#
+#    SmartMobSpawning.MinDelay
+#        Description: Respawn time in seconds when none of the quest creatures are alive nearby.
+#        Default:     30
+
+SmartMobSpawning.MinDelay = 30
+
+#
+#    SmartMobSpawning.MaxDelay
+#        Description: Longest respawn time in seconds while a nearby player needs the loot, used
+#                     when plenty of the quest creatures are alive.
+#        Default:     120
+
+SmartMobSpawning.MaxDelay = 120
+
+#
+#    SmartMobSpawning.AliveTargetPerPlayer
+#        Description: How many living quest creatures each needing player should have nearby
+#                     before the area counts as fully stocked.
+#        Default:     5
+
+SmartMobSpawning.AliveTargetPerPlayer = 5
+
+#
+#    SmartMobSpawning.MaxSpawnTime
+#        Description: Spawns whose normal respawn time in seconds is longer than this are left
+#                     alone. Very long timers usually belong to events and unique targets.
+#        Default:     1800 - (30 minutes)
+
+SmartMobSpawning.MaxSpawnTime = 1800
+
+#
+#    SmartMobSpawning.ScanInterval
+#        Description: Seconds between checks for creatures that died before the player needed
+#                     them, for example before the quest was accepted.
+#        Default:     15
+#                     0  - Disabled, only creatures dying while a player needs them are changed
+
+SmartMobSpawning.ScanInterval = 15
+
+#
+#    SmartMobSpawning.AllowElites
+#        Description: Also shorten the timer of elite creatures. Rare, rare elite and world boss
+#                     creatures are never changed.
+#        Default:     0 - Disabled
+#                     1 - Enabled
+
+SmartMobSpawning.AllowElites = 0
+
+#
+#    SmartMobSpawning.IncludePools
+#        Description: Also shorten the timer of creatures that belong to a spawn pool.
+#        Default:     0 - Disabled
+#                     1 - Enabled
+
+SmartMobSpawning.IncludePools = 0
+
+#
+#    SmartMobSpawning.Bots
+#        Description: Which playerbots count as players who need loot.
+#        Default:     1 - Only bots grouped with a real player
+#                     0 - No bots
+#                     2 - All bots
+
+SmartMobSpawning.Bots = 1
+
+#
+#    SmartMobSpawning.Debug
+#        Description: Write every timer change to the log.
+#        Default:     0 - Disabled
+#                     1 - Enabled
+
+SmartMobSpawning.Debug = 0
+
+#
+###################################################################################################
