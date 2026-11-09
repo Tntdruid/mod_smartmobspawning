@@ -8,7 +8,8 @@
  * Two entry points:
  *  - OnUnitDeath: the creature that just died gets its timer adjusted.
  *  - OnPlayerUpdate (periodic scan): creatures that died before the player needed
- *    them are found in the map's respawn queue and pulled forward.
+ *    them are found in the map's respawn queue and pulled forward. Looted chests
+ *    stay in the grid with their own timer, so those are found by a grid search.
  *
  * All work happens from hooks that run on the map's own update thread, and only
  * touches that map and the player being updated.
@@ -17,6 +18,8 @@
 #include "CellImpl.h"
 #include "Config.h"
 #include "Creature.h"
+#include "DBCStores.h"
+#include "GameObject.h"
 #include "GameTime.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
@@ -54,6 +57,9 @@ namespace
         bool enabled = true;
         bool allowElites = false;
         bool includePools = false;
+        bool gameObjects = true;
+        bool gameObjectPools = true;
+        bool gatheringNodes = false;
         bool debug = false;
         float radius = 100.0f;
         uint32 minDelay = 30;
@@ -138,9 +144,14 @@ namespace
         }
     }
 
+    bool IsEligibleSpawnTime(uint32 spawnTimeSecs)
+    {
+        return spawnTimeSecs > settings.minDelay && spawnTimeSecs <= settings.maxSpawnTime;
+    }
+
     bool IsEligibleSpawn(ObjectGuid::LowType spawnId, uint32 spawnTimeSecs)
     {
-        if (!spawnId || spawnTimeSecs <= settings.minDelay || spawnTimeSecs > settings.maxSpawnTime)
+        if (!spawnId || !IsEligibleSpawnTime(spawnTimeSecs))
             return false;
 
         return settings.includePools || !sPoolMgr->IsPartOfAPool<Creature>(spawnId);
@@ -151,21 +162,22 @@ namespace
     class LootNeedCache
     {
     public:
-        explicit LootNeedCache(std::vector<Player*> const& players) : _players(players) { }
+        LootNeedCache(LootStore const& store, std::vector<Player*> const& players) : _store(store), _players(players) { }
 
         bool IsNeeded(uint32 lootId)
         {
             auto [itr, inserted] = _known.try_emplace(lootId, false);
             if (inserted)
-                itr->second = std::any_of(_players.begin(), _players.end(), [lootId](Player const* player)
+                itr->second = std::any_of(_players.begin(), _players.end(), [this, lootId](Player const* player)
                 {
-                    return LootTemplates_Creature.HaveQuestLootForPlayer(lootId, player);
+                    return _store.HaveQuestLootForPlayer(lootId, player);
                 });
 
             return itr->second;
         }
 
     private:
+        LootStore const& _store;
         std::vector<Player*> const& _players;
         std::unordered_map<uint32, bool> _known;
     };
@@ -245,7 +257,7 @@ namespace
         if (needers.empty())
             return;
 
-        LootNeedCache needs(needers);
+        LootNeedCache needs(LootTemplates_Creature, needers);
         uint32 const alive = CountAliveQuestCreatures(creature, needs);
         uint32 const delay = CalculateDelay(creature->GetRespawnDelay(), alive, static_cast<uint32>(needers.size()), creature->GetSpawnId());
 
@@ -304,7 +316,7 @@ namespace
         };
 
         std::vector<Player*> players{ player };
-        LootNeedCache needs(players);
+        LootNeedCache needs(LootTemplates_Creature, players);
         std::vector<Candidate> candidates;
 
         time_t const now = GameTime::GetGameTime().count();
@@ -355,6 +367,99 @@ namespace
                     candidate.spawnId, candidate.respawnTime - newTime, player->GetName(), alive);
         }
     }
+
+    class ChestInRange
+    {
+    public:
+        ChestInRange(WorldObject const* origin, float range) : _origin(origin), _range(range) { }
+
+        bool operator()(GameObject* go) const
+        {
+            return go->GetGoType() == GAMEOBJECT_TYPE_CHEST && _origin->IsWithinDistInMap(go, _range);
+        }
+
+    private:
+        WorldObject const* _origin;
+        float _range;
+    };
+
+    bool IsGatheringNode(GameObjectTemplate const* info)
+    {
+        LockEntry const* lock = sLockStore.LookupEntry(info->GetLockId());
+        if (!lock)
+            return false;
+
+        for (uint8 i = 0; i < MAX_LOCK_CASE; ++i)
+            if (lock->Type[i] == LOCK_KEY_SKILL && (lock->Index[i] == LOCKTYPE_HERBALISM || lock->Index[i] == LOCKTYPE_MINING))
+                return true;
+
+        return false;
+    }
+
+    bool IsEligibleChest(GameObject const* chest)
+    {
+        ObjectGuid::LowType const spawnId = chest->GetSpawnId();
+        if (!spawnId || !chest->isSpawnedByDefault() || !IsEligibleSpawnTime(chest->GetRespawnDelay()))
+            return false;
+
+        if (!settings.gameObjectPools && sPoolMgr->IsPartOfAPool<GameObject>(spawnId))
+            return false;
+
+        return settings.gatheringNodes || !IsGatheringNode(chest->GetGOInfo());
+    }
+
+    void ScanPendingChests(Player* player)
+    {
+        Map* map = player->GetMap();
+        if (!map->IsWorldMap())
+            return;
+
+        std::list<GameObject*> chests;
+        ChestInRange check(player, settings.radius);
+        Acore::GameObjectListSearcher<ChestInRange> searcher(player, chests, check);
+        Cell::VisitObjects(player, searcher, settings.radius);
+
+        std::vector<Player*> players{ player };
+        LootNeedCache needs(LootTemplates_Gameobject, players);
+        std::vector<GameObject*> pending;
+        uint32 alive = 0;
+
+        time_t const now = GameTime::GetGameTime().count();
+
+        for (GameObject* chest : chests)
+        {
+            uint32 const lootId = chest->GetGOInfo()->GetLootId();
+            if (!lootId || !needs.IsNeeded(lootId))
+                continue;
+
+            if (chest->isSpawned())
+                ++alive;
+            else if (chest->GetRespawnTime() > now + time_t(settings.minDelay) && IsEligibleChest(chest))
+                pending.push_back(chest);
+        }
+
+        for (GameObject* chest : pending)
+        {
+            uint32 const normalDelay = chest->GetRespawnDelay();
+            uint32 const delay = CalculateDelay(normalDelay, alive, 1, chest->GetSpawnId());
+            time_t const current = chest->GetRespawnTime();
+            if (now + time_t(delay) + SCAN_MIN_IMPROVEMENT >= current)
+                continue;
+
+            chest->SetRespawnTime(int32(delay));
+
+            // SetRespawnTime also replaces the object's normal delay, which would
+            // otherwise keep every later respawn of this object short as well.
+            chest->SetRespawnDelay(int32(normalDelay));
+
+            if (map->GetGORespawnTime(chest->GetSpawnId()))
+                chest->SaveRespawnTime();
+
+            if (settings.debug)
+                LOG_INFO("module", "SmartMobSpawning: {} (spawn {}) pulled forward by {}s for {}, {} available",
+                    chest->GetName(), chest->GetSpawnId(), current - (now + time_t(delay)), player->GetName(), alive);
+        }
+    }
 }
 
 class SmartMobSpawningWorldScript : public WorldScript
@@ -373,6 +478,9 @@ public:
         settings.scanIntervalMs = sConfigMgr->GetOption<uint32>("SmartMobSpawning.ScanInterval", 15) * IN_MILLISECONDS;
         settings.allowElites = sConfigMgr->GetOption<bool>("SmartMobSpawning.AllowElites", false);
         settings.includePools = sConfigMgr->GetOption<bool>("SmartMobSpawning.IncludePools", false);
+        settings.gameObjects = sConfigMgr->GetOption<bool>("SmartMobSpawning.GameObjects", true);
+        settings.gameObjectPools = sConfigMgr->GetOption<bool>("SmartMobSpawning.GameObjects.IncludePools", true);
+        settings.gatheringNodes = sConfigMgr->GetOption<bool>("SmartMobSpawning.GameObjects.IncludeGatheringNodes", false);
         settings.botMode = sConfigMgr->GetOption<uint32>("SmartMobSpawning.Bots", BOTS_WITH_HUMAN_GROUP);
         settings.debug = sConfigMgr->GetOption<bool>("SmartMobSpawning.Debug", false);
     }
@@ -412,8 +520,13 @@ public:
 
         timer->remainingMs = settings.scanIntervalMs;
 
-        if (IsCountedPlayer(player))
-            ScanPendingRespawns(player);
+        if (!IsCountedPlayer(player))
+            return;
+
+        ScanPendingRespawns(player);
+
+        if (settings.gameObjects)
+            ScanPendingChests(player);
     }
 };
 

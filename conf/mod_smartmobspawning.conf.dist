@@ -62,9 +62,10 @@ SmartMobSpawning.MaxSpawnTime = 1800
 #
 #    SmartMobSpawning.ScanInterval
 #        Description: Seconds between checks for creatures that died before the player needed
-#                     them, for example before the quest was accepted.
+#                     them, for example before the quest was accepted, and for looted objects.
 #        Default:     15
 #                     0  - Disabled, only creatures dying while a player needs them are changed
+#                          and objects are not changed at all
 
 SmartMobSpawning.ScanInterval = 15
 
@@ -84,6 +85,34 @@ SmartMobSpawning.AllowElites = 0
 #                     1 - Enabled
 
 SmartMobSpawning.IncludePools = 0
+
+#
+#    SmartMobSpawning.GameObjects
+#        Description: Also shorten the timer of lootable objects such as Giant Clams while a
+#                     nearby player still needs their loot. Uses the same delay settings as
+#                     creatures, counted from the scan that finds the looted object.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+
+SmartMobSpawning.GameObjects = 1
+
+#
+#    SmartMobSpawning.GameObjects.IncludePools
+#        Description: Include objects that belong to a spawn pool. When the timer ends, the pool
+#                     picks which object appears next, so it can be another spawn in that pool.
+#                     Giant Clams are pooled.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+
+SmartMobSpawning.GameObjects.IncludePools = 1
+
+#
+#    SmartMobSpawning.GameObjects.IncludeGatheringNodes
+#        Description: Include herbs and mining veins.
+#        Default:     0 - Disabled
+#                     1 - Enabled
+
+SmartMobSpawning.GameObjects.IncludeGatheringNodes = 0
 
 #
 #    SmartMobSpawning.Bots
