@@ -9,7 +9,10 @@
 #
 #    Timer formula, counted from the moment the creature dies:
 #        upper = min(the spawn's normal respawn time, MaxDelay)
-#        delay = MinDelay + (upper - MinDelay) * min(1, alive / (AliveTargetPerPlayer * players))
+#        delay = MinDelay + (upper - MinDelay) * min(1, alive / (AliveTargetPerPlayer * parties))
+#
+#    A group counts as one party however many members need the loot, and bots in it do too.
+#    Players outside a group count as one party each.
 #
 #    A corpse is never removed early, so a creature cannot return before its corpse has decayed.
 #
@@ -45,8 +48,8 @@ SmartMobSpawning.MaxDelay = 120
 
 #
 #    SmartMobSpawning.AliveTargetPerPlayer
-#        Description: How many living quest creatures each needing player should have nearby
-#                     before the area counts as fully stocked.
+#        Description: How many living quest creatures each needing player or group should have
+#                     nearby before the area counts as fully stocked.
 #        Default:     5
 
 SmartMobSpawning.AliveTargetPerPlayer = 5

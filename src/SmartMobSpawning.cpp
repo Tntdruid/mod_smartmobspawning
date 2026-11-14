@@ -41,6 +41,7 @@
 #include <cmath>
 #include <list>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -91,18 +92,20 @@ namespace
         return session && session->GetRemoteAddress() == "headless";
     }
 
-    bool IsGroupedWithHuman(Player* bot)
+    bool GroupHasHuman(Group* group)
     {
-        Group* group = bot->GetGroup();
-        if (!group)
-            return false;
-
         for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
             if (Player* member = itr->GetSource())
                 if (!IsBot(member))
                     return true;
 
         return false;
+    }
+
+    bool IsGroupedWithHuman(Player* bot)
+    {
+        Group* group = bot->GetGroup();
+        return group && GroupHasHuman(group);
     }
 
     bool IsCountedPlayer(Player* player)
@@ -122,6 +125,51 @@ namespace
             default:
                 return false;
         }
+    }
+
+    // A group hunts together, so it counts once. Counting each member would make a
+    // party with bots ask for several times as many creatures and keep every timer
+    // at the minimum.
+    uint32 CountParties(std::vector<Player*> const& players)
+    {
+        std::unordered_set<Group const*> groups;
+        uint32 solo = 0;
+        for (Player* player : players)
+        {
+            if (Group const* group = player->GetGroup())
+                groups.insert(group);
+            else
+                ++solo;
+        }
+
+        return solo + static_cast<uint32>(groups.size());
+    }
+
+    // One scan per group: run by its human members, or by the leader of a group
+    // without humans when all bots are counted.
+    bool IsScanOwner(Player* player)
+    {
+        Group* group = player->GetGroup();
+        if (!IsBot(player) || !group)
+            return true;
+
+        if (GroupHasHuman(group))
+            return false;
+
+        return group->GetLeaderGUID() == player->GetGUID();
+    }
+
+    // The scanning player plus the counted group members close enough to share the hunt.
+    std::vector<Player*> GetScanParty(Player* player)
+    {
+        std::vector<Player*> party{ player };
+        if (Group* group = player->GetGroup())
+            for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
+                if (Player* member = itr->GetSource())
+                    if (member != player && player->IsWithinDistInMap(member, settings.radius) && IsCountedPlayer(member))
+                        party.push_back(member);
+
+        return party;
     }
 
     bool IsEligibleTemplate(CreatureTemplate const* cinfo)
@@ -259,7 +307,8 @@ namespace
 
         LootNeedCache needs(LootTemplates_Creature, needers);
         uint32 const alive = CountAliveQuestCreatures(creature, needs);
-        uint32 const delay = CalculateDelay(creature->GetRespawnDelay(), alive, static_cast<uint32>(needers.size()), creature->GetSpawnId());
+        uint32 const parties = CountParties(needers);
+        uint32 const delay = CalculateDelay(creature->GetRespawnDelay(), alive, parties, creature->GetSpawnId());
 
         time_t const current = creature->GetRespawnTime();
         if (GameTime::GetGameTime().count() + time_t(delay) >= current)
@@ -272,8 +321,8 @@ namespace
             creature->SaveRespawnTime();
 
         if (settings.debug)
-            LOG_INFO("module", "SmartMobSpawning: {} (spawn {}) respawns in {}s, {} alive, {} player(s) need it",
-                creature->GetName(), creature->GetSpawnId(), delay, alive, needers.size());
+            LOG_INFO("module", "SmartMobSpawning: {} (spawn {}) respawns in {}s, {} alive, {} player(s) in {} party/parties need it",
+                creature->GetName(), creature->GetSpawnId(), delay, alive, needers.size(), parties);
     }
 
     // A creature can have up to three possible entries; all of them must be allowed
@@ -315,7 +364,7 @@ namespace
             uint32 spawnTimeSecs;
         };
 
-        std::vector<Player*> players{ player };
+        std::vector<Player*> const players = GetScanParty(player);
         LootNeedCache needs(LootTemplates_Creature, players);
         std::vector<Candidate> candidates;
 
@@ -419,7 +468,7 @@ namespace
         Acore::GameObjectListSearcher<ChestInRange> searcher(player, chests, check);
         Cell::VisitObjects(player, searcher, settings.radius);
 
-        std::vector<Player*> players{ player };
+        std::vector<Player*> const players = GetScanParty(player);
         LootNeedCache needs(LootTemplates_Gameobject, players);
         std::vector<GameObject*> pending;
         uint32 alive = 0;
@@ -520,7 +569,7 @@ public:
 
         timer->remainingMs = settings.scanIntervalMs;
 
-        if (!IsCountedPlayer(player))
+        if (!IsCountedPlayer(player) || !IsScanOwner(player))
             return;
 
         ScanPendingRespawns(player);

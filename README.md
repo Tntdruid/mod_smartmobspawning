@@ -10,10 +10,12 @@ Når en mob dør, tjekker modulet, om en spiller inden for `Radius` mangler noge
 
 ```
 upper = min(normal respawn-tid, MaxDelay)
-delay = MinDelay + (upper - MinDelay) * min(1, levende / (AliveTargetPerPlayer * spillere))
+delay = MinDelay + (upper - MinDelay) * min(1, levende / (AliveTargetPerPlayer * grupper))
 ```
 
-Med standardværdierne og en enkelt spiller på en mob med 300 sekunders respawn:
+En gruppe tæller som én, uanset hvor mange medlemmer og bots der mangler loot. En spiller uden gruppe tæller også som én.
+
+Med standardværdierne og én spiller eller gruppe på en mob med 300 sekunders respawn:
 
 | Levende mobs i nærheden | Ny respawn-tid |
 |---|---|
@@ -21,7 +23,7 @@ Med standardværdierne og en enkelt spiller på en mob med 300 sekunders respawn
 | 2 | ca. 66 sek. |
 | 5 eller flere | ca. 120 sek. |
 
-Derudover scanner modulet hvert `ScanInterval` sekund køen af ventende respawns omkring spilleren. Det hjælper, når mobs døde, før du fik brug for dem, for eksempel før du tog questen.
+Derudover scanner modulet hvert `ScanInterval` sekund køen af ventende respawns omkring spilleren. Det hjælper, når mobs døde, før du fik brug for dem, for eksempel før du tog questen. Der scannes én gang pr. gruppe, fra de rigtige spillere i den, og gruppemedlemmer inden for `Radius` tæller med i, hvad der mangles.
 
 Der lægges en lille forskydning oven i tiden pr. spawn, så en hel flok ikke dukker op på samme tid.
 
